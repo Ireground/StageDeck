@@ -34,8 +34,7 @@ Set **TAIL** to **SEND TO BUS (OUT 3/4)**. Each track then keeps its panning, EQ
 REAPER setup (once per track):
 1. Set the track to **4 channels**: click the **Route** button → *Track channels: 4*.
 2. In the same window, add a **send** to your reverb bus with *Audio: 3/4 → 1/2*.
-3. Turn off the track's **master/parent send** for channels 3/4, or just leave the send as the only path for 3/4. Only 1/2 goes to the parent by default.
-4. On the reverb bus, use any reverb you like, set **100 % wet** and **0 ms pre-delay**.
+3. On the reverb bus, use any reverb you like, set **100 % wet** and **0 ms pre-delay**.
 
 Switch TAIL back to **BUILT-IN REVERB** whenever you want the self-contained version.
 
