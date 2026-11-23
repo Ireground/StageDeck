@@ -13,7 +13,7 @@ AudioProcessorValueTreeState::ParameterLayout StageDeckProcessor::createLayout()
         NormalisableRange<float> (-1.0f, 1.0f), 0.0f, AudioParameterFloatAttributes().withStringFromValueFunction (
             [] (float v, int) { const int n = roundToInt (std::abs (v) * 100.0f); return n == 0 ? String ("C") : String (n) + (v < 0 ? " L" : " R"); })));
     p.push_back (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::depth, 1 }, "Distance",
-        NormalisableRange<float> (0.0f, 1.0f), 0.3f, AudioParameterFloatAttributes().withStringFromValueFunction (pct)));
+        NormalisableRange<float> (0.0f, 1.0f), 0.0f, AudioParameterFloatAttributes().withStringFromValueFunction (pct)));
     p.push_back (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::height, 1 }, "Height",
         NormalisableRange<float> (0.0f, 1.0f), 0.5f, AudioParameterFloatAttributes().withStringFromValueFunction (
             [] (float v, int) { const int n = roundToInt ((v - 0.5f) * 200.0f); return n == 0 ? String ("Ear level") : (n > 0 ? "+" : "") + String (n) + " %"; })));
@@ -140,8 +140,25 @@ void StageDeckProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer&)
 
 void StageDeckProcessor::setParam (const String& id, float realValue)
 {
+    // only talk to the host when the value really changes: redundant edits make some hosts
+    // echo older values back to the plugin
     if (auto* p = apvts.getParameter (id))
-        p->setValueNotifyingHost (p->convertTo0to1 (realValue));
+    {
+        const float norm = p->convertTo0to1 (realValue);
+        if (std::abs (norm - p->getValue()) > 1.0e-6f)
+            p->setValueNotifyingHost (norm);
+    }
+}
+
+void StageDeckProcessor::setParamAsGesture (const String& id, float realValue)
+{
+    if (auto* p = apvts.getParameter (id))
+        if (std::abs (p->convertTo0to1 (realValue) - p->getValue()) > 1.0e-6f)
+        {
+            p->beginChangeGesture();
+            setParam (id, realValue);
+            p->endChangeGesture();
+        }
 }
 
 String StageDeckProcessor::getDisplayName() const
@@ -172,9 +189,9 @@ void StageDeckProcessor::syncLinkedRoom()
     auto adoptShared = [this, &reg]
     {
         const auto r = reg.getRoom();
-        setParam (ParamIDs::roomSize, r.size);
-        setParam (ParamIDs::decay, r.decay);
-        setParam (ParamIDs::brightness, r.bright);
+        setParamAsGesture (ParamIDs::roomSize, r.size);
+        setParamAsGesture (ParamIDs::decay, r.decay);
+        setParamAsGesture (ParamIDs::brightness, r.bright);
         seenRoomVersion = r.version;
         lastRoom[0] = pRoom->load(); lastRoom[1] = pDecay->load(); lastRoom[2] = pBright->load();
     };

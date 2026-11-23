@@ -523,11 +523,10 @@ void StageView::mouseDoubleClick (const MouseEvent& e)
     Item it;
     if (hitTestItem (e.position, it) && it.own)
     {
-        for (auto* id : { &ParamIDs::posX, &ParamIDs::depth, &ParamIDs::height }) proc.beginGesture (*id);
-        proc.setParam (ParamIDs::posX, 0.0f);
-        proc.setParam (ParamIDs::depth, 0.3f);
-        proc.setParam (ParamIDs::height, 0.5f);
-        for (auto* id : { &ParamIDs::posX, &ParamIDs::depth, &ParamIDs::height }) proc.endGesture (*id);
+        // reset = dead centre, right at the front of the stage, at ear level
+        proc.setParamAsGesture (ParamIDs::posX, 0.0f);
+        proc.setParamAsGesture (ParamIDs::depth, 0.0f);
+        proc.setParamAsGesture (ParamIDs::height, 0.5f);
         repaint();
     }
 }
@@ -535,9 +534,7 @@ void StageView::mouseDoubleClick (const MouseEvent& e)
 void StageView::mouseWheelMove (const MouseEvent&, const MouseWheelDetails& w)
 {
     const float h = jlimit (0.0f, 1.0f, proc.getParam (ParamIDs::height) + w.deltaY * (w.isReversed ? -0.08f : 0.08f));
-    proc.beginGesture (ParamIDs::height);
-    proc.setParam (ParamIDs::height, h);
-    proc.endGesture (ParamIDs::height);
+    proc.setParamAsGesture (ParamIDs::height, h);
     repaint();
 }
 

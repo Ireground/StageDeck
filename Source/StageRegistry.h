@@ -10,7 +10,7 @@ struct StageEntry
     juce::String name;
     juce::Colour trackColour;
     int icon = 0;
-    float x = 0, depth = 0.3f, height = 0.5f;
+    float x = 0, depth = 0.0f, height = 0.5f;
 
     // a move requested by another instance's editor; the owner applies it on its timer
     bool pendingMove = false;

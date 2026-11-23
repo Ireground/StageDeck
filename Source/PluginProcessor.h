@@ -48,6 +48,7 @@ public:
     // helpers for the GUI
     stage::SceneParams currentSceneParams() const;
     void setParam (const juce::String& id, float realValue);
+    void setParamAsGesture (const juce::String& id, float realValue);
     void beginGesture (const juce::String& id) { if (auto* p = apvts.getParameter (id)) p->beginChangeGesture(); }
     void endGesture (const juce::String& id)   { if (auto* p = apvts.getParameter (id)) p->endChangeGesture(); }
     float getParam (const juce::String& id) const { return apvts.getRawParameterValue (id)->load(); }

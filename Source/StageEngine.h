@@ -100,7 +100,7 @@ struct Biquad
 struct SceneParams
 {
     float x = 0.0f;          // -1 (left) .. +1 (right)
-    float depth = 0.3f;      // 0 (close) .. 1 (back wall)
+    float depth = 0.0f;      // 0 (close) .. 1 (back wall)
     float height = 0.5f;     // 0 (floor) .. 0.5 (ear level) .. 1 (ceiling)
     float roomSize = 0.4f;   // 0 (booth) .. 1 (arena)
     float decay = 1.6f;      // seconds (RT60 of the late reverb)
