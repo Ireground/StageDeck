@@ -369,6 +369,16 @@ void StageView::paint (Graphics& g)
                     area.reduced (12 * uiScale, 8 * uiScale).removeFromTop (14 * uiScale), Justification::topLeft);
     }
 
+    // hints
+    g.setColour (Pal::dim.withAlpha (0.7f));
+    g.setFont (uiFont (10.5f * uiScale));
+    {
+        auto hb = area.reduced (12 * uiScale, 8 * uiScale);
+        g.drawText ("Drag = move", hb.removeFromBottom (13 * uiScale), Justification::bottomRight);
+        g.drawText ("Shift+drag / wheel = height", hb.removeFromBottom (13 * uiScale), Justification::bottomRight);
+        g.drawText ("Double-click = reset  |  Right-click = icon", hb.removeFromBottom (13 * uiScale), Justification::bottomRight);
+    }
+
     // sounds
     for (auto& it : collectItems())
     {
@@ -566,7 +576,7 @@ void InfoPanel::paint (Graphics& g)
         { "1ST REFLECTION", String (s.firstReflMs, 1) + " ms" },
         { "PRE-DELAY", String (s.latePredelayMs, 1) + " ms" },
         { "EARLY REFL.", fmtDb (s.erGainDb) },
-        { "REVERB TAIL", fmtDb (lateDb) },
+        { sendMode ? "REVERB SEND" : "REVERB TAIL", fmtDb (sendMode ? lateDb + stage::gainToDb (stage::kSendScale) : lateDb) },
         { "DIRECT / REVERB", fmtDb (directDb - lateDb) },
     };
 
@@ -679,6 +689,14 @@ StageDeckEditor::StageDeckEditor (StageDeckProcessor& p)
     };
     addAndMakeVisible (roomPresets);
 
+   #if STAGEDECK_SEND
+    tailMode.addItemList ({ "TAIL: BUILT-IN REVERB", "TAIL: SEND TO BUS (OUT 3/4)" }, 1);
+    tailAttachment = std::make_unique<AudioProcessorValueTreeState::ComboBoxAttachment> (p.apvts, ParamIDs::tailMode, tailMode);
+    addAndMakeVisible (tailMode);
+    linkAttachment = std::make_unique<AudioProcessorValueTreeState::ButtonAttachment> (p.apvts, ParamIDs::linkRoom, linkRoom);
+    linkRoom.setTooltip ("Room size, decay and brightness are shared by every StageDeck Send with Link Room on");
+    addAndMakeVisible (linkRoom);
+   #endif
     showOthers.setToggleState (proc.showOthers, dontSendNotification);
     showOthers.onClick = [this] { proc.showOthers = showOthers.getToggleState(); stage.repaint(); };
     addAndMakeVisible (showOthers);
@@ -740,7 +758,7 @@ void StageDeckEditor::timerCallback()
 {
     stage::Scene s;
     stage::computeScene (proc.currentSceneParams(), s);
-    info.setScene (s, proc.currentSceneParams().fs);
+    info.setScene (s, proc.currentSceneParams().fs, proc.isSendMode());
     stage.repaint();
     const int icon = proc.iconIndex.load();
     const String label = Icons::getName (icon).toUpperCase() + "   |   " + proc.getDisplayName();
@@ -762,10 +780,22 @@ void StageDeckEditor::paint (Graphics& g)
     g.drawText (a, h, Justification::centredLeft);
     g.setColour (Pal::blue);
     g.drawText (b, h.withTrimmedLeft (aw), Justification::centredLeft);
+    float tx = aw + GlyphArrangement::getStringWidth (uiFont (22.0f * sc, true), b) + 10 * sc;
+   #if STAGEDECK_SEND
+    {
+        const float pw = 46 * sc, ph = 18 * sc;
+        auto pill = Rectangle<float> (h.getX() + tx, h.getCentreY() - ph * 0.5f, pw, ph);
+        g.setColour (Pal::gold);
+        g.fillRoundedRectangle (pill, ph * 0.5f);
+        g.setColour (Pal::badge);
+        g.setFont (uiFont (11.0f * sc, true));
+        g.drawText ("SEND", pill, Justification::centred);
+        tx += pw + 10 * sc;
+    }
+   #endif
     g.setColour (Pal::dim);
     g.setFont (uiFont (11.0f * sc, true));
-    g.drawText ("SPATIAL PLACEMENT", h.withTrimmedLeft (aw + GlyphArrangement::getStringWidth (uiFont (22.0f * sc, true), b) + 14 * sc),
-                Justification::centredLeft);
+    g.drawText ("SPATIAL PLACEMENT", h.withTrimmedLeft (tx + 4 * sc), Justification::centredLeft);
     g.setColour (Colours::black.withAlpha (0.35f));
     g.drawHorizontalLine (headerArea.getBottom(), 0.0f, (float) getWidth());
 
@@ -776,11 +806,6 @@ void StageDeckEditor::paint (Graphics& g)
     g.drawText ("HIGH", ha.removeFromTop (14 * sc), Justification::centred);
     g.drawText ("LOW", ha.removeFromBottom (14 * sc), Justification::centred);
 
-    // hints
-    g.setColour (Pal::dim.withAlpha (0.8f));
-    g.setFont (uiFont (11.0f * sc));
-    g.drawText ("Drag = move    Shift+drag / wheel = height    Double-click = reset    Right-click = instrument",
-                bottomArea.toFloat().withTrimmedLeft (bottomArea.getWidth() * 0.42f).withTrimmedRight (14 * sc), Justification::centredRight);
 }
 
 void StageDeckEditor::resized()
@@ -822,5 +847,13 @@ void StageDeckEditor::resized()
     auto bb = bottomArea.reduced ((int) (14 * sc), (int) (7 * sc));
     roomPresets.setBounds (bb.removeFromLeft ((int) (190 * sc)));
     bb.removeFromLeft ((int) (16 * sc));
+   #if STAGEDECK_SEND
+    tailMode.setBounds (bb.removeFromLeft ((int) (270 * sc)));
+    bb.removeFromLeft ((int) (18 * sc));
+    linkRoom.setBounds (bb.removeFromLeft ((int) (140 * sc)));
+    bb.removeFromLeft ((int) (6 * sc));
+    showOthers.setBounds (bb.removeFromLeft ((int) (200 * sc)));
+   #else
     showOthers.setBounds (bb.removeFromLeft ((int) (260 * sc)));
+   #endif
 }

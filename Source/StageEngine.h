@@ -16,6 +16,7 @@ namespace stage
 constexpr float kPi = 3.14159265358979f;
 constexpr float kSpeedOfSound = 343.0f;
 constexpr int   kNumTaps = 26;
+constexpr float kSendScale = 1.2f; // send level relative to the built-in tail level
 
 inline float lerp (float a, float b, float t) { return a + (b - a) * t; }
 inline float clamp01 (float v) { return std::min (1.0f, std::max (0.0f, v)); }
@@ -291,6 +292,7 @@ struct EngineParams
     SceneParams scene;
     float mix = 1.0f;
     float outputDb = 0.0f;
+    bool sendMode = false; // true: no built-in tail, the pre-delayed reverb send goes to the send outputs
 };
 
 class StageEngine
@@ -326,10 +328,10 @@ public:
     void setTargets (const EngineParams& p) { target = p; }
 
     // in-place stereo processing; if right == nullptr the input is mono and only left is written.
-    void process (float* left, float* right, int numSamples)
+    void process (float* left, float* right, int numSamples, float* sendL = nullptr, float* sendR = nullptr)
     {
         constexpr int sub = 32;
-        if (! initialised) { cur = target; updateScene (true); initialised = true; }
+        if (! initialised) { cur = target; tailAmt = target.sendMode ? 0.0f : 1.0f; updateScene (true); initialised = true; }
 
         int pos = 0;
         while (pos < numSamples)
@@ -337,7 +339,8 @@ public:
             const int n = std::min (sub, numSamples - pos);
             smoothParams (n);
             updateScene (false);
-            processChunk (left + pos, right != nullptr ? right + pos : nullptr, n);
+            processChunk (left + pos, right != nullptr ? right + pos : nullptr, n,
+                          sendL != nullptr ? sendL + pos : nullptr, sendR != nullptr ? sendR + pos : nullptr);
             pos += n;
         }
     }
@@ -426,9 +429,19 @@ private:
         }
     }
 
-    void processChunk (float* left, float* right, int n)
+    void processChunk (float* left, float* right, int n, float* sendL, float* sendR)
     {
         const float inv = 1.0f / (float) n;
+        // built-in tail <-> send crossfade (about 50 ms)
+        const float tailTarget = target.sendMode ? 0.0f : 1.0f;
+        const float tailStep = (float) n / (0.05f * (float) fs);
+        const float tail0 = tailAmt;
+        tailAmt = tailTarget > tailAmt ? std::min (tailTarget, tailAmt + tailStep) : std::max (tailTarget, tailAmt - tailStep);
+        const float dTail = (tailAmt - tail0) * inv;
+        float tail = tail0;
+        const bool runFdn = tailAmt > 0.0f || tail0 > 0.0f;
+        if (runFdn && fdnIdle) { for (auto& l : fdn) l.reset(); for (auto& lp : loopLp) lp.z = 0; for (auto& d : diff) d.dl.reset(); }
+        fdnIdle = ! runFdn;
         // per-sample ramp increments
         const float dPanL = (tgtPanL - panL) * inv, dPanR = (tgtPanR - panR) * inv, dDir = (tgtDirect - direct) * inv;
         const float dWid = (tgtWidth - width) * inv, dPre = (tgtPre - pre) * inv;
@@ -471,7 +484,16 @@ private:
 
             // ---- late reverb (FDN)
             preLine.push (M);
-            float x = preLine.read (pre);
+            const float preOut = preLine.read (pre);
+            tail += dTail;
+            // reverb send: already pre-delayed and scaled by distance, for a 100 % wet reverb on a bus
+            if (sendL != nullptr) sendL[i] = preOut * lateL * kSendScale * (1.0f - tail) * mixV * outV;
+            if (sendR != nullptr) sendR[i] = preOut * lateR * kSendScale * (1.0f - tail) * mixV * outV;
+
+            float outLate0 = 0.0f, outLate1 = 0.0f;
+            if (runFdn)
+            {
+            float x = preOut;
             for (auto& d : diff) x = d.process (x);
             x *= fdnInScale;
 
@@ -485,8 +507,8 @@ private:
                 if (k == 1) d += mod; else if (k == 4) d -= mod * 0.7f; else if (k == 6) d += mod * 0.5f;
                 o[k] = fdn[k].read (d);
             }
-            const float outLate0 = (o[0] + o[2] + o[4] + o[6]) * 0.5f;
-            const float outLate1 = (o[1] + o[3] + o[5] + o[7]) * 0.5f;
+            outLate0 = (o[0] + o[2] + o[4] + o[6]) * 0.5f * tail;
+            outLate1 = (o[1] + o[3] + o[5] + o[7]) * 0.5f * tail;
             // Hadamard mix
             std::array<float, 8> h = o;
             for (size_t len = 1; len < 8; len <<= 1)
@@ -495,6 +517,7 @@ private:
             const float hs = 0.35355339f;
             for (size_t k = 0; k < 8; ++k)
                 fdn[k].push (loopLp[k].process (h[k] * hs * fdnG[k]) + x);
+            }
 
             const float wl = l + eL + outLate0 * lateL;
             const float wr = r + eR + outLate1 * lateR;
@@ -519,7 +542,8 @@ private:
     std::array<OnePoleLP, 8> loopLp;
     OnePoleLP erLpL, erLpR;
     std::array<float, 8> fdnD {}, tgtFdnD {}, fdnG {};
-    float fdnInScale = 1.0f, lfoPhase = 0.0f;
+    float fdnInScale = 1.0f, lfoPhase = 0.0f, tailAmt = 1.0f;
+    bool fdnIdle = false;
 
     float panL = 1, panR = 1, direct = 1, width = 1, pre = 1, lateL = 0, lateR = 0, mixV = 1, outV = 1;
     float tgtPanL = 1, tgtPanR = 1, tgtDirect = 1, tgtWidth = 1, tgtPre = 1, tgtLateL = 0, tgtLateR = 0, tgtMix = 1, tgtOut = 1;

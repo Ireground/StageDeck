@@ -94,7 +94,18 @@ public:
         return entries;
     }
 
+    // linked room settings (StageDeck Send)
+    struct Room { int version = 0; float size = 0.4f, decay = 1.6f, bright = 0.5f; };
+    Room getRoom() const { const juce::ScopedLock sl (lock); return room; }
+    int publishRoom (float size, float decay, float bright)
+    {
+        const juce::ScopedLock sl (lock);
+        room.size = size; room.decay = decay; room.bright = bright;
+        return ++room.version;
+    }
+
 private:
+    Room room;
     juce::CriticalSection lock;
     juce::Array<StageEntry> entries;
     int nextId = 0;

@@ -96,9 +96,10 @@ class InfoPanel : public juce::Component
 {
 public:
     void paint (juce::Graphics&) override;
-    void setScene (const stage::Scene& s, double fs) { scene = s; sampleRate = fs; repaint(); }
+    void setScene (const stage::Scene& s, double fs, bool send) { scene = s; sampleRate = fs; sendMode = send; repaint(); }
     float uiScale = 1.0f;
 private:
+    bool sendMode = false;
     stage::Scene scene;
     double sampleRate = 48000.0;
 };
@@ -127,7 +128,13 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> heightAttachment;
     juce::TextButton iconButton;
     juce::ComboBox roomPresets;
-    juce::ToggleButton showOthers { "Show other StageDeck tracks" };
+    juce::ToggleButton showOthers { STAGEDECK_SEND ? "Show other tracks" : "Show other StageDeck tracks" };
+   #if STAGEDECK_SEND
+    juce::ComboBox tailMode;
+    juce::ToggleButton linkRoom { "Link room" };
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> tailAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> linkAttachment;
+   #endif
 
     juce::Rectangle<int> headerArea, knobArea, middleArea, bottomArea, heightArea;
     float sc = 1.0f;

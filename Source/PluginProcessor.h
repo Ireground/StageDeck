@@ -3,11 +3,16 @@
 #include "StageEngine.h"
 #include "StageRegistry.h"
 
+#ifndef STAGEDECK_SEND
+ #define STAGEDECK_SEND 0
+#endif
+
 namespace ParamIDs
 {
     static const juce::String posX = "posX", depth = "depth", height = "height",
         roomSize = "roomSize", decay = "decay", brightness = "brightness", reverb = "reverb",
-        distLevel = "distLevel", width = "width", mix = "mix", output = "output";
+        distLevel = "distLevel", width = "width", mix = "mix", output = "output",
+        tailMode = "tailMode", linkRoom = "linkRoom";
 }
 
 class StageDeckProcessor : public juce::AudioProcessor, private juce::Timer
@@ -24,7 +29,7 @@ public:
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override { return true; }
 
-    const juce::String getName() const override { return "StageDeck"; }
+    const juce::String getName() const override { return STAGEDECK_SEND ? "StageDeck Send" : "StageDeck"; }
     bool acceptsMidi() const override { return false; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
@@ -50,6 +55,7 @@ public:
     juce::String getDisplayName() const;
     juce::Colour getTrackColour() const { const juce::ScopedLock sl (nameLock); return trackColour; }
     int getRegistryId() const { return registryId; }
+    bool isSendMode() const { return STAGEDECK_SEND && pTail != nullptr && pTail->load() > 0.5f; }
 
     juce::AudioProcessorValueTreeState apvts;
 
@@ -75,6 +81,12 @@ private:
     std::atomic<float>* pRoom = nullptr; std::atomic<float>* pDecay = nullptr; std::atomic<float>* pBright = nullptr;
     std::atomic<float>* pReverb = nullptr; std::atomic<float>* pDist = nullptr; std::atomic<float>* pWidth = nullptr;
     std::atomic<float>* pMix = nullptr; std::atomic<float>* pOut = nullptr;
+    std::atomic<float>* pTail = nullptr; std::atomic<float>* pLink = nullptr;
+
+    void syncLinkedRoom();
+    bool wasLinked = false;
+    int seenRoomVersion = 0;
+    float lastRoom[3] { -1.0f, -1.0f, -1.0f };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (StageDeckProcessor)
 };

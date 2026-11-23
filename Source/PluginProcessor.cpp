@@ -37,13 +37,22 @@ AudioProcessorValueTreeState::ParameterLayout StageDeckProcessor::createLayout()
     p.push_back (std::make_unique<AudioParameterFloat> (ParameterID { ParamIDs::output, 1 }, "Output",
         NormalisableRange<float> (-24.0f, 12.0f), 0.0f, AudioParameterFloatAttributes().withLabel ("dB")
             .withStringFromValueFunction ([] (float v, int) { return (v > 0 ? "+" : "") + String (v, 1) + " dB"; })));
+   #if STAGEDECK_SEND
+    p.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ParamIDs::tailMode, 1 }, "Reverb Tail",
+        StringArray { "Built-in", "Send to bus" }, 1));
+    p.push_back (std::make_unique<AudioParameterBool> (ParameterID { ParamIDs::linkRoom, 1 }, "Link Room", true));
+   #endif
     return { p.begin(), p.end() };
 }
 
 StageDeckProcessor::StageDeckProcessor()
     : AudioProcessor (BusesProperties()
                           .withInput ("Input", AudioChannelSet::stereo(), true)
-                          .withOutput ("Output", AudioChannelSet::stereo(), true)),
+                          .withOutput ("Output", AudioChannelSet::stereo(), true)
+                         #if STAGEDECK_SEND
+                          .withOutput ("Reverb Send", AudioChannelSet::stereo(), true)
+                         #endif
+                          ),
       apvts (*this, nullptr, "StageDeck", createLayout())
 {
     pX = apvts.getRawParameterValue (ParamIDs::posX);
@@ -57,6 +66,10 @@ StageDeckProcessor::StageDeckProcessor()
     pWidth = apvts.getRawParameterValue (ParamIDs::width);
     pMix = apvts.getRawParameterValue (ParamIDs::mix);
     pOut = apvts.getRawParameterValue (ParamIDs::output);
+   #if STAGEDECK_SEND
+    pTail = apvts.getRawParameterValue (ParamIDs::tailMode);
+    pLink = apvts.getRawParameterValue (ParamIDs::linkRoom);
+   #endif
 
     registryId = StageRegistry::get().add();
     timerCallback();
@@ -73,6 +86,13 @@ bool StageDeckProcessor::isBusesLayoutSupported (const BusesLayout& layouts) con
 {
     const auto in = layouts.getMainInputChannelSet(), out = layouts.getMainOutputChannelSet();
     if (out != AudioChannelSet::stereo()) return false;
+   #if STAGEDECK_SEND
+    if (layouts.outputBuses.size() > 1)
+    {
+        const auto aux = layouts.getChannelSet (false, 1);
+        if (! aux.isDisabled() && aux != AudioChannelSet::stereo()) return false;
+    }
+   #endif
     return in == AudioChannelSet::mono() || in == AudioChannelSet::stereo();
 }
 
@@ -94,18 +114,28 @@ stage::SceneParams StageDeckProcessor::currentSceneParams() const
 void StageDeckProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer&)
 {
     ScopedNoDenormals noDenormals;
-    const int numIn = getTotalNumInputChannels(), numOut = getTotalNumOutputChannels();
+    const int numIn = getMainBusNumInputChannels();
     const int n = buffer.getNumSamples();
-    if (numOut < 2 || n == 0) return;
+    if (getMainBusNumOutputChannels() < 2 || n == 0) return;
     if (numIn == 1) buffer.copyFrom (1, 0, buffer, 0, 0, n);
-    for (int ch = jmax (2, numIn); ch < numOut; ++ch) buffer.clear (ch, 0, n);
+    for (int ch = jmax (2, numIn); ch < buffer.getNumChannels(); ++ch) buffer.clear (ch, 0, n);
+
+    float* sendL = nullptr; float* sendR = nullptr;
+   #if STAGEDECK_SEND
+    if (getBusCount (false) > 1 && getBus (false, 1)->isEnabled())
+    {
+        auto aux = getBusBuffer (buffer, false, 1);
+        if (aux.getNumChannels() >= 2) { sendL = aux.getWritePointer (0); sendR = aux.getWritePointer (1); }
+    }
+   #endif
 
     stage::EngineParams ep;
     ep.scene = currentSceneParams();
     ep.mix = pMix->load();
     ep.outputDb = pOut->load();
+    ep.sendMode = isSendMode();
     engine.setTargets (ep);
-    engine.process (buffer.getWritePointer (0), buffer.getWritePointer (1), n);
+    engine.process (buffer.getWritePointer (0), buffer.getWritePointer (1), n, sendL, sendR);
 }
 
 void StageDeckProcessor::setParam (const String& id, float realValue)
@@ -130,8 +160,44 @@ void StageDeckProcessor::updateTrackProperties (const TrackProperties& propertie
     trackColour = properties.colour;
 }
 
+void StageDeckProcessor::syncLinkedRoom()
+{
+   #if STAGEDECK_SEND
+    auto& reg = StageRegistry::get();
+    const bool linked = pLink->load() > 0.5f;
+    const float cur[3] { pRoom->load(), pDecay->load(), pBright->load() };
+    auto differs = [] (const float* a, const float* b)
+    { return std::abs (a[0] - b[0]) > 1e-4f || std::abs (a[1] - b[1]) > 1e-3f || std::abs (a[2] - b[2]) > 1e-4f; };
+
+    auto adoptShared = [this, &reg]
+    {
+        const auto r = reg.getRoom();
+        setParam (ParamIDs::roomSize, r.size);
+        setParam (ParamIDs::decay, r.decay);
+        setParam (ParamIDs::brightness, r.bright);
+        seenRoomVersion = r.version;
+        lastRoom[0] = pRoom->load(); lastRoom[1] = pDecay->load(); lastRoom[2] = pBright->load();
+    };
+    auto publishOwn = [this, &reg, &cur]
+    {
+        seenRoomVersion = reg.publishRoom (cur[0], cur[1], cur[2]);
+        std::copy (cur, cur + 3, lastRoom);
+    };
+
+    if (linked)
+    {
+        if (! wasLinked)                    { if (reg.getRoom().version > 0) adoptShared(); else publishOwn(); }
+        else if (differs (cur, lastRoom))   publishOwn();                       // changed here -> everyone follows
+        else if (reg.getRoom().version != seenRoomVersion) adoptShared();       // changed on another track
+    }
+    wasLinked = linked;
+   #endif
+}
+
 void StageDeckProcessor::timerCallback()
 {
+    syncLinkedRoom();
+
     auto& reg = StageRegistry::get();
     float x, d, h; bool gesture = false;
     const bool hasMove = reg.takePendingMove (registryId, x, d, h, gesture);

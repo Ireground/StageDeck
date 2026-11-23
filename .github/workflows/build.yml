@@ -14,10 +14,16 @@ jobs:
         run: cmake -B build -A x64
 
       - name: Build
-        run: cmake --build build --config Release --target StageDeck_VST3 --parallel
+        run: cmake --build build --config Release --target StageDeck_VST3 StageDeckSend_VST3 --parallel
 
       - name: Upload VST3
         uses: actions/upload-artifact@v4
         with:
           name: StageDeck-VST3-Windows
           path: build/StageDeck_artefacts/Release/VST3/StageDeck.vst3
+
+      - name: Upload StageDeck Send VST3
+        uses: actions/upload-artifact@v4
+        with:
+          name: StageDeckSend-VST3-Windows
+          path: "build/StageDeckSend_artefacts/Release/VST3/StageDeck Send.vst3"
